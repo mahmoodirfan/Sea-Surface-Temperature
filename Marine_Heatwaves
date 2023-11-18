@@ -1,0 +1,93 @@
+// Remote Sensing Analysis for Sea Surface Temperature (SST) Anomalies and Heatwave Detection in the Arabian Sea
+
+// Load the Arabian Sea shapefile
+// This shapefile defines the geographical focus for our SST anomaly analysis
+var geometry = ee.FeatureCollection('users/your_username/Arabian_Sea_Shapefile'); 
+
+// Define the date range for the analysis
+// We are looking at a comprehensive period from 2003 to 2021 to understand long-term trends
+var startDate = '2003-01-01';
+var endDate = '2021-12-31';
+
+// Fetching MODIS Aqua SST data for the Arabian Sea within the defined date range
+// MODIS Aqua is chosen for its reliability in providing quality SST data
+var collection = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
+  .filterBounds(geometry)
+  .select('sst')
+  .filterDate(startDate, endDate);
+
+// Calculating the climatological baseline (mean SST) for the entire period
+// The baseline is essential for identifying significant deviations indicating anomalies
+var baseline = collection.mean();
+
+// Function to retain essential time properties of each image
+// Keeping track of time is crucial for temporal analysis of SST anomalies
+var retainProperties = function(image) {
+  return image.set('system:time_start', image.get('system:time_start'));
+};
+
+// Computing SST deviations from the baseline to identify anomalies
+// These anomalies will be critical in detecting unusual temperature changes, possibly indicating heatwaves
+var anomalies = collection.map(function(image) {
+  return image.subtract(baseline).set('system:time_start', image.get('system:time_start'));
+});
+
+// Establishing criteria for heatwave detection based on SST anomalies
+// We define a significant temperature anomaly and a minimum duration to classify a heatwave
+var threshold = 3;  // SST anomaly threshold in °C
+var duration = 5;   // Minimum consecutive days for a heatwave classification
+
+// Function to identify and isolate heatwave periods within the SST anomaly data
+// This method looks for sustained periods where the SST anomaly exceeds our predefined threshold
+var identifyHeatwaves = function(anomalyImage) {
+  var currentDate = anomalyImage.date();
+  var startDate = currentDate.advance(-duration, 'day');
+  var endDate = currentDate.advance(duration, 'day');
+  
+  // Extracting images within the specified time window from the anomaly collection
+  var windowImages = heatwaves.filterDate(startDate, endDate);
+  
+  // Summing binary images within the time window to identify continuous heatwave events
+  var heatwaveSum = windowImages.sum();
+  
+  // Classifying a period as a heatwave if the sum matches the duration
+  return anomalyImage.updateMask(heatwaveSum.gte(duration));
+};
+
+// Creating a binary collection to mark heatwave occurrences
+// Each image in this collection will represent whether a heatwave occurred on a given day
+var heatwaves = anomalies.map(function(image) {
+  return image.gt(threshold)
+              .rename('heatwave')
+              .set('system:time_start', image.get('system:time_start'));
+});
+
+// Applying the heatwave identification function to our binary collection
+// This step refines our data to focus on actual heatwave events
+var heatwaveEvents = heatwaves.map(identifyHeatwaves);
+
+// Computing the total count of heatwave days annually
+// This metric is vital for assessing the frequency and trend of heatwaves over the years
+var annualHeatwaveDays = heatwaveEvents.sum();
+
+// [Placeholder for visualization and exporting results]
+// Visualization could include mapping the annual heatwave days or the heatwave events
+// Export functions can be used to share the results for further scientific analysis
+
+// Diagnostic prints to confirm the data integrity and understand the dataset properties
+// This is a best practice for verifying the data before deep analysis
+print('Size of original collection:', collection.size());
+print('Size of anomalies:', anomalies.size());
+print('Size of heatwaves:', heatwaves.size());
+
+print('Properties of a sample SST image:', ee.Image(collection.first()).getInfo().properties);
+print('Properties of a sample anomaly image:', ee.Image(anomalies.first()).getInfo().properties);
+print('Properties of a sample heatwave image:', ee.Image(heatwaves.first()).getInfo().properties);
+
+// Printing sample heatwave values for a specific, smaller region within the Arabian Sea
+// This localized analysis helps in understanding the spatial distribution of heatwaves
+var smallRegion = geometry.geometry().bounds().buffer(-5000);  // Buffer value adjusted as needed
+print('Heatwave values in a small region:', ee.Image(heatwaves.first()).reduceRegion({
+  reducer: ee.Reducer.toList(),
+  geometry: smallRegion,
+  scale: 1000  // Scale adjusted based on data resolution and analysis requirements
